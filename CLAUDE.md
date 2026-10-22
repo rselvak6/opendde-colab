@@ -61,6 +61,17 @@ Read/NotebookEdit tools. Don't try them directly on this file. Instead:
 
 ## Key domain/debugging facts
 
+- `scripts/download_opendde_data.sh` must be run with `--skip-search-database`
+  on Colab. `search_database/` is only the template + RNA-MSA search data, and
+  the pred command uses `--use_template false --use_rna_msa false` with protein
+  MSAs coming from the remote MSA service (api.colabfold.com), so nothing reads
+  it — but it decompresses to ~89 GB (nt_rna ~75 GB, rnacentral ~13 GB) and
+  blows the Colab disk. On *any* search-database failure (disk, stalled
+  multi-GB transfer, missing `zstd` CLI) the script falls back to
+  `$DATA_BASE_URL/search_database.tar.gz` and reports
+  `Failed to download/extract .../search_database.tar.gz`; that tarball returns
+  HTTP 403, so the 403 is a masked symptom, never the real cause.
+
 - OpenDDE's `runner/inference.py` `update_inference_configs()` forces fp32
   (silently overriding `--dtype bf16`) for the confidence_head and
   sample_diffusion phases whenever total tokens <= 2560, which can cause
