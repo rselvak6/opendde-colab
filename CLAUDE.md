@@ -3,7 +3,7 @@
 Google Colab pipeline around OpenDDE (an AlphaFold3-style structure
 predictor). The structural biology focus is an EGFR-kinase-domain + RAD51
 fusion protein that forms a homodimer, plus various EGFR TKIs (erlotinib,
-afatinib, osimertinib, alflutinib) and cetuximab bound to EGFR.
+afatinib, osimertinib, alflutinib, lazertinib) and cetuximab bound to EGFR.
 
 Two notebooks:
 
