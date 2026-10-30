@@ -72,6 +72,42 @@ Read/NotebookEdit tools. Don't try them directly on this file. Instead:
   `Failed to download/extract .../search_database.tar.gz`; that tarball returns
   HTTP 403, so the 403 is a masked symptom, never the real cause.
 
+- Templates: OpenDDE takes **no structure file** as input. There is no AF3-style
+  `mmcifPath` / `templates` array — the only hook is `templatesPath` on a
+  `proteinChain`, pointing at an hmmsearch `.a3m` or HHsearch `.hhr` *hit* file.
+  The structure is then resolved by the 4-char PDB ID in the hit name from
+  `$OPENDDE_ROOT_DIR/search_database/mmcif/<id>.cif`, else downloaded from PDBe
+  (`data.template.fetch_remote` defaults true). Template *inference* therefore
+  does not need the skipped search database — only `kalign` (3.x CLI:
+  `-i/-o/-format fasta`) and the `common/` files. Four gates apply, and three
+  fail **silently** (the run just logs `Found 0 templates`):
+  1. hit name must be `[a-zA-Z\d]{4}_<chain>` (`get_pdb_id_and_chain`);
+  2. the ID must exist in `common/release_date_cache.json`, else
+     "`<id> date unknown`" in `TemplateHitFilter.prefilter`;
+  3. the CIF's own `min(_pdbx_audit_revision_history.revision_date)` must be
+     <= `2021-09-30` — hardcoded as `max_template_date` in
+     `infer_dataloader.py` (the checkpoint's data cutoff). No revision date is
+     read as 9999-12-31 and dropped. This rejects 7UKV (2022-11-23) and 9NIS
+     (absent from the cache) as templates;
+  4. some monomer's `_chem_comp.type` must contain lowercase `"peptide"`
+     (`_get_protein_chains`). The PDB writes `L-peptide linking`; **AlphaFold3
+     writes `L-PEPTIDE LINKING`**, which fails and gives "No protein chains
+     found" — AF3-exported CIFs must have that casing normalized.
+  All 219,912 real PDB IDs in the date cache start with a digit, so a 4-char ID
+  starting with a letter (we use `egfa`/`egfi`) can never collide.
+  `process()` re-aligns the query to the CIF's seqres with kalign and rebuilds
+  the hit indices (`_update_realigned_hit`), so the alignment inside the `.a3m`
+  only feeds the prefilter's coverage ratio. Note
+  `search_database/template_cache/<id>_<chain>.pkl` caches the parsed CIF and
+  will shadow a changed file staged under the same ID.
+
+- The two supplied templates in `egfr/opendde/templates/` are 268-residue EGFR
+  kinase domains (auth numbering 1-268, chain A) that already carry a
+  `2021-09-30` revision date. Relative to the 541-residue fusion chain
+  (residue 1 = EGFR 706, so DFG = 855), the active one is an exact match and
+  the **inactive one is a T790M + V948R double mutant** — V948R blocks the
+  asymmetric activating dimer interface.
+
 - OpenDDE's `runner/inference.py` `update_inference_configs()` forces fp32
   (silently overriding `--dtype bf16`) for the confidence_head and
   sample_diffusion phases whenever total tokens <= 2560, which can cause
