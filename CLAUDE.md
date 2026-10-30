@@ -88,6 +88,23 @@ Read/NotebookEdit tools. Don't try them directly on this file. Instead:
   `GPU_PEAKS` — necessary because Colab runs one cell at a time, so utilisation
   during a prediction cannot be observed from a different cell.
 
+- MSA reuse (`MSA_REUSE` in the monomer notebook's prediction cell):
+  `runner/msa_search.need_msa_search()` skips the ColabFold server for a job
+  when every `proteinChain` carries a `pairedMsaPath`/`unpairedMsaPath` that
+  exists, and `update_infer_json()` writes those per-chain paths into
+  `<input>-update-msa.json` beside the input after a search (the a3m files land
+  in `<out_dir>/<job name>/msa/<i>/{pairing,non_pairing}.a3m`, so they are keyed
+  by job name — which is why each template variant would otherwise fetch its
+  own). The prediction cell indexes those files **by sequence** and injects the
+  paths, so one fetch serves every variant and every other project sharing the
+  protein — all 8 monomer inputs share one 545-residue chain. It never edits an
+  uploaded input: for a no-template run it writes `<run>-reusemsa.json` with
+  `name` unchanged so the output directory does not move, and for a templated
+  run it edits the generated input in place. The saving is small (the server
+  answered in ~3 s per chain); the point is that every run then uses the *same*
+  MSA, so differences between variants are attributable to the template and
+  ligand, and a long batch stops depending on that server staying up.
+
 - `opendde_monomer.ipynb` ends with a cell that deletes the runtime
   (`google.colab.runtime.unassign()`), which wipes the disk including
   `./output`. It audits every run in `RUNS` first and **refuses** to delete any
