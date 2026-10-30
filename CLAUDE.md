@@ -72,6 +72,31 @@ Read/NotebookEdit tools. Don't try them directly on this file. Instead:
   `Failed to download/extract .../search_database.tar.gz`; that tarball returns
   HTTP 403, so the 403 is a masked symptom, never the real cause.
 
+- `opendde pred` is **single-GPU no matter what**, because OpenDDE reads its
+  world size from the `WORLD_SIZE` env var (`opendde/utils/distributed.py`),
+  which only `torchrun` sets. Multi-GPU means the Fold-CP context-parallel path:
+  `torchrun --standalone --nproc_per_node P -m runner.batch_inference pred ...
+  --foldcp_mode distributed --foldcp_size_dp 1 --foldcp_size_cp P`, where
+  `nproc_per_node` must equal `foldcp_size_cp` and `size_dp` only supports 1
+  (a 1×P mesh). Fold-CP does **not** support cuEquivariance: distributed mode
+  resolves `auto` to the slower PyTorch triangle kernels and an explicit `cueq`
+  request fails before the model loads. Since the normal path does use cueq,
+  Fold-CP's value is memory headroom (it splits the token-pair tensors behind
+  the OOMs), not throughput — measure before converting a sweep.
+  `opendde_monomer.ipynb`'s pred cell samples `nvidia-smi` from a guarded daemon
+  thread while each variant runs, recording per-GPU mean/peak utilisation in
+  `GPU_PEAKS` — necessary because Colab runs one cell at a time, so utilisation
+  during a prediction cannot be observed from a different cell.
+
+- `opendde_monomer.ipynb` ends with a cell that deletes the runtime
+  (`google.colab.runtime.unassign()`), which wipes the disk including
+  `./output`. It audits every run in `RUNS` first and **refuses** to delete any
+  that has `.cif` files but no `.zip` beside them. This matters because the
+  sweep writes one output directory per variant while the download cell zips
+  only the selected one — downloading one variant and deleting the runtime is
+  the easy way to lose two thirds of a sweep. `make_archive` there writes to the
+  cwd, which is `/content/OpenDDE` because the install cell does `%cd OpenDDE`.
+
 - Templates: OpenDDE takes **no structure file** as input. There is no AF3-style
   `mmcifPath` / `templates` array — the only hook is `templatesPath` on a
   `proteinChain`, pointing at an hmmsearch `.a3m` or HHsearch `.hhr` *hit* file.
