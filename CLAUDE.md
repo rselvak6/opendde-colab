@@ -113,13 +113,27 @@ Read/NotebookEdit tools. Don't try them directly on this file. Instead:
   no-template runs are reused, and the pred cell skips any variant whose output
   directory already holds `.cif` files.
 
-- `rename_cifs.py` encodes the template in the filename via `TEMPLATE_TOKENS`
-  (`msa_nt` / `msa_tactive` / `msa_tinactive`). Two independent active/inactive
-  axes end up in one name: the template the model was *predicted* with comes
-  first, then the conformation it was *judged* to be in, so
-  `..._msa_tactive_inactive_2GS7_3` is "predicted with the active template,
-  came out inactive". `CONSTRUCT` is still hardcoded to `"dimer"` — monomer
-  runs need it set to `"monomer"` or every output file is mislabelled.
+- Two renamers, sharing their zip-layout helpers. `rename_cifs.py` is for the
+  dimer/fusion runs: inhibitor, supplied template, construct, and a drag-select
+  for the judged conformation, giving
+  `egfr_rad51_{construct}_{inhibitor}_{template}_{conformation}_{PDB}_{n}`.
+  `rename_cifs_monomer.py` is for the monomer sweeps, which have no conformation
+  to judge and so need no PDB lookup: it asks only for the project name and the
+  template, giving `{project_with_underscores}_{template}_{n}`, e.g.
+  `egfr_rad51_monomer_gefitinib_msa_tactive_7.cif`. It imports
+  `find_cifs_in_zip` / `order_cifs` / `SIDECARS` / `_sidecar_json_for` from
+  `rename_cifs` so OpenDDE's zip convention is described in one place only.
+  Both number models by ascending (seed, sample).
+- Template token: `TEMPLATE_TOKENS` = `msa_nt` / `msa_tactive` / `msa_tinactive`.
+  In the dimer name two independent active/inactive axes end up adjacent, in
+  this order: the template the model was *predicted* with, then the conformation
+  it was *judged* to be in. So `..._msa_tactive_inactive_2GS7_3` is "predicted
+  with the active template, came out inactive".
+- Both renamers pre-fill their dropdowns from the zip name, because the
+  notebook's download cell zips `./output/<run_name>` and the sweep's run names
+  are `<project>-tactive` / `-tinactive`: that suffix gives the template (and,
+  in the monomer script, the project once stripped), and "monomer" anywhere in
+  the name gives the construct. All are overridable.
 
 - The two supplied templates in `egfr/opendde/templates/` are 268-residue EGFR
   kinase domains (auth numbering 1-268, chain A) that already carry a
