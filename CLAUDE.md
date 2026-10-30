@@ -162,7 +162,19 @@ Read/NotebookEdit tools. Don't try them directly on this file. Instead:
   `rename_cifs_monomer.py` is for the monomer sweeps, which have no conformation
   to judge and so need no PDB lookup: it asks only for the project name and the
   template, giving `{project_with_underscores}_{template}_{n}`, e.g.
-  `egfr_rad51_monomer_gefitinib_msa_tactive_7.cif`. It imports
+  `egfr_rad51_monomer_gefitinib_msa_tactive_7.cif`. It handles both zip shapes,
+  decided by **contents, never the filename**: a per-run zip's entries start at
+  `seed_101/...` (make_archive over `./output/<run>`), while the combined zip's
+  start with each run's own directory (make_archive over `./output`). The
+  filename is not a signal — a combined archive saved with
+  `ARCHIVE_NAME="egfr-rad51-monomer-afatinib"` is indistinguishable by name from
+  a per-run zip of that project while holding all three variants, so
+  `find_runs_in_zip` groups `.cif` entries by the path above their `seed_*`
+  component: one group is one run, several are a combined archive, each numbered
+  from 0 separately and taking its project/template from its own directory name.
+  Output names embed project and template, so every run of a combined archive
+  lands in one folder without collision, and `process_runs` refuses two runs
+  that would map to the same names. It imports
   `find_cifs_in_zip` / `order_cifs` / `SIDECARS` / `_sidecar_json_for` from
   `rename_cifs` so OpenDDE's zip convention is described in one place only.
   Both number models by ascending (seed, sample).
