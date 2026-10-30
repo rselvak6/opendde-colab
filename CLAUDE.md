@@ -101,6 +101,26 @@ Read/NotebookEdit tools. Don't try them directly on this file. Instead:
   `search_database/template_cache/<id>_<chain>.pkl` caches the parsed CIF and
   will shadow a changed file staged under the same ID.
 
+- The two notebooks drive templates differently on purpose. `opendde.ipynb` has
+  a single `TEMPLATE` dropdown (one variant per run, and it reassigns
+  `PROJECT_NAME` itself). `opendde_monomer.ipynb` sweeps: set `PROJECT_NAME`
+  only, and its setup cell stages both templates and builds `RUNS`, the pred
+  cell loops one `opendde pred` per entry, and a selector cell sets
+  `PROJECT_NAME` for the analysis cells. A single hard-coded pred line cannot
+  serve the sweep — the template is chosen per run by `--use_template` *and* the
+  generated input JSON that carries `templatesPath`, so both must vary together.
+  The sweep's `none` variant keeps the bare project name so earlier
+  no-template runs are reused, and the pred cell skips any variant whose output
+  directory already holds `.cif` files.
+
+- `rename_cifs.py` encodes the template in the filename via `TEMPLATE_TOKENS`
+  (`msa_nt` / `msa_tactive` / `msa_tinactive`). Two independent active/inactive
+  axes end up in one name: the template the model was *predicted* with comes
+  first, then the conformation it was *judged* to be in, so
+  `..._msa_tactive_inactive_2GS7_3` is "predicted with the active template,
+  came out inactive". `CONSTRUCT` is still hardcoded to `"dimer"` — monomer
+  runs need it set to `"monomer"` or every output file is mislabelled.
+
 - The two supplied templates in `egfr/opendde/templates/` are 268-residue EGFR
   kinase domains (auth numbering 1-268, chain A) that already carry a
   `2021-09-30` revision date. Relative to the 541-residue fusion chain

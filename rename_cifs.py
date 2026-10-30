@@ -2,22 +2,31 @@
 """Rename and move OpenDDE prediction .cif files out of a run's output.zip.
 
 Standalone Tkinter GUI (standard library only). Pick a run's output.zip, an
-output folder, and the inhibitor; the .cif files nested in the zip are listed
-in ascending (seed, sample) order and numbered 0, 1, 2, ...  Drag-select the
-ones in the ACTIVE conformation (anything left unselected is treated as
-inactive). On "Rename & move", each model's .cif AND both of its confidence sidecars
+output folder, the inhibitor, and which supplied template the run used; the
+.cif files nested in the zip are listed in ascending (seed, sample) order and
+numbered 0, 1, 2, ...  Drag-select the ones in the ACTIVE conformation
+(anything left unselected is treated as inactive). On "Rename & move", each
+model's .cif AND both of its confidence sidecars
 (*_full_data_sample_*.json and *_summary_confidence_sample_*.json) are copied to
 the output folder, renamed to
 
-  egfr_rad51_dimer_{inhibitor}_msa_nt_{active|inactive}_{PDB}_{model_no}.cif
+  egfr_rad51_dimer_{inhibitor}_{template}_{active|inactive}_{PDB}_{model_no}.cif
   ..._{model_no}_full_data.json
   ..._{model_no}_summary_confidences.json
 
 where {PDB} is the closest reference for that conformation (INHIBITOR_PDBS,
-e.g. afatinib -> 4G5J active / 2GS7 inactive). Choosing "none" (no inhibitor)
+e.g. afatinib -> 4G5J active / 2GS7 inactive) and {template} records whether
+the prediction was seeded with a supplied template (TEMPLATE_TOKENS:
+msa_nt / msa_tactive / msa_tinactive). Choosing "none" (no inhibitor)
 drops the inhibitor segment, e.g. egfr_rad51_dimer_msa_nt_active_2GS2_0.cif.
-A manifest.csv records every file's new names, conformation, inhibitor, PDB,
-model number, and its original paths in the zip.
+A manifest.csv records every file's new names, conformation, inhibitor,
+template, PDB, model number, and its original paths in the zip.
+
+Note the two independent "active/inactive" axes, which the name keeps in this
+order: {template} is the conformation of the template the model was PREDICTED
+with, and the following segment is the conformation the model was JUDGED to be
+in. So ..._msa_tactive_inactive_2GS7_3 means "predicted with the active
+template, came out inactive".
 
 Run it with:  python rename_cifs.py
 
@@ -54,8 +63,40 @@ INHIBITOR_PDBS = {
     "cetuximab":   {"active": "2GS2", "inactive": "2GS7"},
 }
 
+# Which supplied template the run was seeded with, and the filename segment for
+# each. "none" keeps the original msa_nt ("MSA, no template") token so existing
+# output folders stay consistent; the other two mirror the notebook's run-name
+# suffixes (<project>-tactive / -tinactive) so a zip can be traced back to the
+# run that produced it.
+TEMPLATES = ["none", "active", "inactive"]
+TEMPLATE_TOKENS = {
+    "none": "msa_nt",
+    "active": "msa_tactive",
+    "inactive": "msa_tinactive",
+}
+
+# The construct the models are of. The fusion runs this was written for are all
+# homodimers, hence the constant; monomer runs (opendde_monomer.ipynb, inputs
+# named egfr-rad51-monomer-*) need "monomer" here or every file is mislabelled.
+# Promote this to a dropdown alongside the others when monomer runs start.
+CONSTRUCT = "dimer"
+
 _SEED_RE = re.compile(r"seed[_-]?(\d+)", re.IGNORECASE)
 _SAMPLE_RE = re.compile(r"sample[_-]?(\d+)", re.IGNORECASE)
+# The notebook's template sweep names its runs <project>-tactive / -tinactive
+# and the download cell zips ./output/<run_name>, so the zip name usually says
+# which template was used.
+_TEMPLATE_IN_NAME_RE = re.compile(r"-t(active|inactive)\b", re.IGNORECASE)
+
+
+def template_from_zip_name(zip_path):
+    """Guess the template from a zip produced by the notebook's sweep.
+
+    Returns "active"/"inactive" when the name carries the sweep's suffix, else
+    "none". Only a default for the dropdown - the user can always override it.
+    """
+    m = _TEMPLATE_IN_NAME_RE.search(os.path.basename(zip_path))
+    return m.group(1).lower() if m else "none"
 
 
 def find_cifs_in_zip(zip_path):
@@ -97,14 +138,17 @@ def order_cifs(cifs):
     return ordered
 
 
-def build_new_basename(inhibitor, conformation, pdb_id, model_no):
+def build_new_basename(inhibitor, conformation, pdb_id, model_no, template="none"):
     """The shared base name for a model's output .cif / .json (no extension).
 
     The inhibitor segment is omitted when inhibitor == "none" (no inhibitor),
-    e.g. egfr_rad51_dimer_msa_nt_active_2GS2_0.
+    e.g. egfr_rad51_dimer_msa_nt_active_2GS2_0. `template` is the supplied
+    template the run was seeded with and becomes the TEMPLATE_TOKENS segment,
+    which sits immediately before the judged conformation.
     """
     drug = "" if inhibitor == "none" else f"{inhibitor}_"
-    return f"egfr_rad51_dimer_{drug}msa_nt_{conformation}_{pdb_id}_{model_no}"
+    tpl = TEMPLATE_TOKENS[template]
+    return f"egfr_rad51_{CONSTRUCT}_{drug}{tpl}_{conformation}_{pdb_id}_{model_no}"
 
 
 # Per-model sidecars OpenDDE writes next to each .cif in the zip, and the
@@ -135,21 +179,24 @@ def _sidecar_json_for(cif_path, zip_infix):
     return f"{prefix}{m.group(1)}{zip_infix}{m.group(2)}.json"
 
 
-def process(zip_path, out_dir, ordered, active_indices, inhibitor):
+def process(zip_path, out_dir, ordered, active_indices, inhibitor, template="none"):
     """Copy each model's .cif and both confidence sidecars to out_dir, renamed.
 
     Output names, sharing one base per model:
-      egfr_rad51_dimer_{inhibitor}_msa_nt_{active|inactive}_{PDB}_{model_no}.cif
+      egfr_rad51_dimer_{inhibitor}_{template}_{active|inactive}_{PDB}_{model_no}.cif
       ..._{model_no}_full_data.json            (token_pair_pae / atom_plddt)
       ..._{model_no}_summary_confidences.json  (iptm / ptm / chain_pair_iptm)
     Each sidecar is copied only when present in the zip (full_data needs the
     run to have used --need_atom_confidence true). {PDB} is the
-    closest-matching reference for the chosen conformation (INHIBITOR_PDBS).
-    active_indices is the set of ordered-list positions flagged active.
+    closest-matching reference for the chosen conformation (INHIBITOR_PDBS) and
+    {template} the TEMPLATE_TOKENS segment for the supplied template the run
+    used. active_indices is the set of ordered-list positions flagged active.
     Writes manifest.csv and returns its rows.
     """
     active_indices = set(active_indices)
     pdbs = INHIBITOR_PDBS[inhibitor]
+    if template not in TEMPLATE_TOKENS:
+        raise ValueError(f"unknown template {template!r}; expected one of {TEMPLATES}")
     os.makedirs(out_dir, exist_ok=True)
     rows = []
     with zipfile.ZipFile(zip_path) as zf:
@@ -157,7 +204,8 @@ def process(zip_path, out_dir, ordered, active_indices, inhibitor):
         for c in ordered:
             conformation = "active" if c["index"] in active_indices else "inactive"
             pdb_id = pdbs[conformation]
-            base = build_new_basename(inhibitor, conformation, pdb_id, c["index"])
+            base = build_new_basename(inhibitor, conformation, pdb_id, c["index"],
+                                      template)
 
             with zf.open(c["path"]) as src, open(os.path.join(out_dir, base + ".cif"), "wb") as dst:
                 dst.write(src.read())
@@ -181,6 +229,7 @@ def process(zip_path, out_dir, ordered, active_indices, inhibitor):
                 "summary_json_name": summary_name,
                 "conformation": conformation,
                 "inhibitor": inhibitor,
+                "template": template,
                 "pdb_id": pdb_id,
                 "model_no": c["index"],
                 "seed": c["seed"],
@@ -192,8 +241,8 @@ def process(zip_path, out_dir, ordered, active_indices, inhibitor):
     with open(os.path.join(out_dir, "manifest.csv"), "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=[
             "cif_name", "json_name", "summary_json_name", "conformation", "inhibitor",
-            "pdb_id", "model_no", "seed", "sample", "source_cif", "source_json",
-            "source_summary_json"])
+            "template", "pdb_id", "model_no", "seed", "sample", "source_cif",
+            "source_json", "source_summary_json"])
         writer.writeheader()
         writer.writerows(rows)
     return rows
@@ -234,17 +283,25 @@ def main():
             cb.bind("<<ComboboxSelected>>", lambda e: self._scan())
             ttk.Button(frm, text="Rescan .zip", command=self._scan).grid(row=2, column=2, pady=(4, 0))
 
+            ttk.Label(frm, text="Supplied template:").grid(row=3, column=0, sticky="w", pady=(4, 0))
+            self.template_var = tk.StringVar(value="none")
+            tcb = ttk.Combobox(frm, textvariable=self.template_var, values=TEMPLATES,
+                               state="readonly")
+            tcb.grid(row=3, column=1, sticky="w", padx=4, pady=(4, 0))
+            ttk.Label(frm, text="(auto-set from the zip name when it says -tactive/-tinactive)",
+                      foreground="#555").grid(row=3, column=2, sticky="w", pady=(4, 0))
+
             # --- status + list ---
             self.count_var = tk.StringVar(value="Pick a .zip and an inhibitor to scan for .cif files.")
             ttk.Label(frm, textvariable=self.count_var).grid(
-                row=3, column=0, columnspan=3, sticky="w", pady=(10, 0))
+                row=4, column=0, columnspan=3, sticky="w", pady=(10, 0))
             ttk.Label(frm, text="Drag to select ACTIVE conformations "
                                 "(anything unselected is treated as inactive):").grid(
-                row=4, column=0, columnspan=3, sticky="w")
+                row=5, column=0, columnspan=3, sticky="w")
 
             lb_frame = ttk.Frame(frm)
-            lb_frame.grid(row=5, column=0, columnspan=3, sticky="nsew", pady=(2, 0))
-            frm.rowconfigure(5, weight=1)
+            lb_frame.grid(row=6, column=0, columnspan=3, sticky="nsew", pady=(2, 0))
+            frm.rowconfigure(6, weight=1)
             lb_frame.rowconfigure(0, weight=1)
             lb_frame.columnconfigure(0, weight=1)
             self.listbox = tk.Listbox(lb_frame, selectmode="extended", height=16,
@@ -256,12 +313,12 @@ def main():
 
             # --- action ---
             ttk.Button(frm, text="Rename & move", command=self._process).grid(
-                row=6, column=0, columnspan=3, pady=(10, 0))
+                row=7, column=0, columnspan=3, pady=(10, 0))
             self.status_var = tk.StringVar(value="")
             ttk.Label(frm, textvariable=self.status_var, foreground="#555").grid(
-                row=7, column=0, columnspan=3, sticky="w", pady=(4, 0))
+                row=8, column=0, columnspan=3, sticky="w", pady=(4, 0))
 
-            root.minsize(560, 520)
+            root.minsize(640, 560)
 
         # --- callbacks ---
         def _browse_zip(self):
@@ -270,6 +327,7 @@ def main():
                 filetypes=[("Zip archives", "*.zip"), ("All files", "*.*")])
             if path:
                 self.zip_var.set(path)
+                self.template_var.set(template_from_zip_name(path))
                 if self.inhibitor_var.get():
                     self._scan()
 
@@ -318,9 +376,11 @@ def main():
             if not inhibitor:
                 messagebox.showerror("Error", "Select an inhibitor.")
                 return
+            template = self.template_var.get().strip() or "none"
             active = set(self.listbox.curselection())
             try:
-                rows = process(self.zip_var.get().strip(), out_dir, self.ordered, active, inhibitor)
+                rows = process(self.zip_var.get().strip(), out_dir, self.ordered, active,
+                               inhibitor, template)
             except Exception as exc:  # surface any extraction/IO error to the user
                 messagebox.showerror("Error", f"Failed while writing files:\n{exc}")
                 return
@@ -331,7 +391,9 @@ def main():
             summary = (f"Copied {len(rows)} .cif + {n_full} full_data + {n_sum} "
                        f"summary_confidences file(s) to:\n{out_dir}\n\n"
                        f"{n_active} active, {len(rows) - n_active} inactive.\n"
-                       f"Inhibitor: {inhibitor}\nManifest: manifest.csv")
+                       f"Inhibitor: {inhibitor}\n"
+                       f"Template: {template} ({TEMPLATE_TOKENS[template]})\n"
+                       f"Manifest: manifest.csv")
             if missing:
                 summary += (f"\n\nNote: {missing} sidecar(s) were missing from the zip "
                             f"(full_data needs --need_atom_confidence true).")
